@@ -31,11 +31,17 @@ pub struct Tray {
     pending: MenuItem<Wry>,
     /// Lo último que se enseñó: para saber si apareció algo nuevo.
     last_pending: std::sync::Mutex<u32>,
+    /// M25 fase 4 — mientras se graba una nota, el texto lo dice y los eventos
+    /// del enlace no lo pisan.
+    listening: std::sync::atomic::AtomicBool,
 }
 
 fn sessions_label(count: usize) -> String {
     format!("Sessions: {count}")
 }
+
+/// Lo que dice la bandeja mientras se graba una nota (M25 fase 4).
+const LISTENING_TOOLTIP: &str = "Stratum Dot — listening…";
 
 fn plural(n: u32, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
@@ -199,7 +205,27 @@ fn create(app: &AppHandle<Wry>) -> tauri::Result<Tray> {
         sessions,
         pending,
         last_pending: std::sync::Mutex::new(0),
+        listening: std::sync::atomic::AtomicBool::new(false),
     })
+}
+
+/// M25 fase 4 — mientras se graba una nota, la bandeja dice que escucha (además
+/// del indicador de micrófono de Windows). Al terminar, vuelve a lo de siempre.
+pub fn set_listening<R: Runtime>(app: &AppHandle<R>, listening: bool) {
+    let Some(state) = app.try_state::<DotState>() else {
+        return;
+    };
+    let Some(tray) = &state.tray else { return };
+    tray.listening
+        .store(listening, std::sync::atomic::Ordering::SeqCst);
+    if listening {
+        let _ = tray.icon.set_tooltip(Some(LISTENING_TOOLTIP));
+        return;
+    }
+    let count = state.link.session_count();
+    let _ = tray
+        .icon
+        .set_tooltip(Some(tooltip(&state.link.connection(), count)));
 }
 
 /// Mantiene al día el contador y el texto de la bandeja. Solo lee el sobre del
@@ -217,6 +243,11 @@ pub fn on_event<R: Runtime>(app: &AppHandle<R>, event: &DotEvent) {
     let Some(tray) = &state.tray else { return };
     let count = state.link.session_count();
     let _ = tray.sessions.set_text(sessions_label(count));
+    // Mientras graba una nota (M25 fase 4), el texto de la bandeja es «escuchando»
+    // y no se pisa; el contador de sesiones sí sigue al día.
+    if tray.listening.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     let _ = tray
         .icon
         .set_tooltip(Some(tooltip(&state.link.connection(), count)));
@@ -254,10 +285,7 @@ mod tests {
             "Stratum Dot — reconnecting"
         );
         assert_eq!(
-            tooltip(
-                &ConnectionState::error("x"),
-                0
-            ),
+            tooltip(&ConnectionState::error("x"), 0),
             "Stratum Dot — not connected"
         );
     }

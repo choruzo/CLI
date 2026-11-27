@@ -379,6 +379,13 @@ export function fakeNative(): FakeNative {
     watchesRemove: vi.fn(async (watchId: string): Promise<unknown> => ({ watch: sampleWatch({ id: watchId }) })),
     notifyWatch: vi.fn(async (_title: string, _body: string) => undefined),
     notifyHealth: vi.fn(async (_title: string, _body: string) => undefined),
+    voiceStart: vi.fn(async (_sessionId: string) => undefined),
+    voiceStop: vi.fn(
+      async (): Promise<unknown> => ({
+        transcript: { text: 'hola', durationSec: 1, capped: false, device: 'cpu' },
+      }),
+    ),
+    voiceCancel: vi.fn(async () => undefined),
     checkForUpdate: vi.fn(async (): Promise<UpdateInfo | null> => null),
     installUpdate: vi.fn(async (_onProgress: (p: UpdateProgress) => void) => undefined),
     approverStatus: vi.fn(async (): Promise<ApproverStatus> => useApprover.getState().status),

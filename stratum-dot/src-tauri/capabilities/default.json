@@ -71,6 +71,9 @@
     "allow-dot-hide",
     "allow-dot-quit",
     "allow-dot-update-check",
-    "allow-dot-update-install"
+    "allow-dot-update-install",
+    "allow-dot-voice-start",
+    "allow-dot-voice-stop",
+    "allow-dot-voice-cancel"
   ]
 }

@@ -407,6 +407,22 @@ pub enum CallAction {
     },
     /// Desktop (modo código) — `memory.documents`: los `STRATUM.md` de esa sesión.
     ProjectMemoryDocuments { session_id: String },
+    /// M25 fase 4 — `voice.begin`: abrir la subida de una nota. La sesión solo
+    /// dice en qué traza se anota. Devuelve el `uploadId` **sin interpretar**,
+    /// que el lado nativo usa para los otros tres.
+    VoiceBegin { session_id: String },
+    /// M25 fase 4 — `voice.append`: un trozo de PCM16 LE mono a 16 kHz, con `seq`
+    /// desde 0. Los bytes viajan en base64; se validan antes de salir.
+    VoiceAppend {
+        upload_id: String,
+        seq: u64,
+        /// PCM16 little-endian, mono a 16 kHz: par y ≤ 64 KiB (`dot-link` lo mira).
+        pcm: Vec<u8>,
+    },
+    /// M25 fase 4 — `voice.end`: cerrar la subida, que el daemon transcriba.
+    VoiceEnd { upload_id: String },
+    /// M25 fase 4 — `voice.cancel`: tirar el audio, sin transcribir.
+    VoiceCancel { upload_id: String },
 }
 
 /// M16 — topes de una rutina (`ProtocolRoutineLimits`). Se validan en
@@ -499,6 +515,10 @@ impl CallAction {
             CallAction::ProjectMemoryDecisions { .. } => "project-memory-decisions",
             CallAction::ProjectMemoryForget { .. } => "project-memory-forget",
             CallAction::ProjectMemoryDocuments { .. } => "project-memory-documents",
+            CallAction::VoiceBegin { .. } => "voice-begin",
+            CallAction::VoiceAppend { .. } => "voice-append",
+            CallAction::VoiceEnd { .. } => "voice-end",
+            CallAction::VoiceCancel { .. } => "voice-cancel",
         }
     }
 
@@ -539,6 +559,13 @@ impl CallAction {
                 | CallAction::AskSession { .. }
                 | CallAction::BackgroundJobs { .. }
                 | CallAction::ProjectMemoryForget { .. }
+                // M25 fase 4: los cuatro de la voz cambian algo en el daemon (una
+                // subida abierta, llena, cerrada o tirada): sin respuesta, su
+                // resultado es desconocido y no se repiten.
+                | CallAction::VoiceBegin { .. }
+                | CallAction::VoiceAppend { .. }
+                | CallAction::VoiceEnd { .. }
+                | CallAction::VoiceCancel { .. }
         )
     }
 }

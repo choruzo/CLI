@@ -140,7 +140,10 @@ impl DaemonLauncher for CliLauncher {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     LaunchError::CliMissing
                 } else {
-                    LaunchError::Failed(format!("could not run `stratum daemon start` ({:?})", e.kind()))
+                    LaunchError::Failed(format!(
+                        "could not run `stratum daemon start` ({:?})",
+                        e.kind()
+                    ))
                 }
             })?;
             match tokio::time::timeout(self.timeout, child.wait()).await {
@@ -148,10 +151,12 @@ impl DaemonLauncher for CliLauncher {
                 Ok(Ok(status)) => Err(match status.code() {
                     // cmd.exe: «no se reconoce como un comando».
                     Some(9009) | Some(127) => LaunchError::CliMissing,
-                    Some(code) => {
-                        LaunchError::Failed(format!("`stratum daemon start` exited with code {code}"))
+                    Some(code) => LaunchError::Failed(format!(
+                        "`stratum daemon start` exited with code {code}"
+                    )),
+                    None => {
+                        LaunchError::Failed("`stratum daemon start` was terminated".to_string())
                     }
-                    None => LaunchError::Failed("`stratum daemon start` was terminated".to_string()),
                 }),
                 Ok(Err(e)) => Err(LaunchError::Failed(format!(
                     "`stratum daemon start` failed ({:?})",

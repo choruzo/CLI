@@ -347,6 +347,19 @@ export interface NativeBridge {
   notifyWatch(title: string, body: string): Promise<void>;
   /** M23 — el aviso de degradación del asistente: solo informa; pulsarlo abre la pestaña *Health*. */
   notifyHealth(title: string, body: string): Promise<void>;
+  /**
+   * M25 fase 4 — empezar a grabar una nota. El micrófono lo abre Rust: el audio
+   * **no** pasa por aquí. Solo se acepta con la ventana visible y con el foco, y
+   * al perderlo se cancela. La sesión es la del campo: solo dice dónde se anota.
+   */
+  voiceStart(sessionId: string): Promise<void>;
+  /**
+   * M25 fase 4 — terminar la nota: el daemon la transcribe en local. Devuelve su
+   * `result` sin validar (`protocol/results.ts`).
+   */
+  voiceStop(): Promise<unknown>;
+  /** M25 fase 4 — tirar la nota: ni transcripción ni audio. */
+  voiceCancel(): Promise<void>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
   approverStatus(): Promise<ApproverStatus>;
   /** Abre la ventana nativa de desbloqueo. La clave se teclea allí: aquí no pasa. */
@@ -452,6 +465,9 @@ export const tauriBridge: NativeBridge = {
   watchesRemove: (watchId) => invoke<unknown>('dot_watches_remove', { watchId }),
   notifyWatch: (title, body) => invoke('dot_notify_watch', { title, body }),
   notifyHealth: (title, body) => invoke('dot_notify_health', { title, body }),
+  voiceStart: (sessionId) => invoke('dot_voice_start', { sessionId }),
+  voiceStop: () => invoke<unknown>('dot_voice_stop'),
+  voiceCancel: () => invoke('dot_voice_cancel'),
   checkForUpdate: () => invoke<UpdateInfo | null>('dot_update_check'),
   installUpdate: (onProgress) => {
     const channel = new Channel<UpdateProgress>();

@@ -206,6 +206,9 @@ const COMMANDS = [
   'dot_steer_run',
   'dot_update_check',
   'dot_update_install',
+  'dot_voice_cancel',
+  'dot_voice_start',
+  'dot_voice_stop',
   'dot_watches_list',
   'dot_watches_pause',
   'dot_watches_remove',
@@ -479,6 +482,11 @@ describe('el lado nativo', () => {
       // Panel de trayectoria de Desktop (solo lectura); Dot no la tiene en su perfil.
       'trace.subscribe',
       'trace.unsubscribe',
+      // M25 fase 4: la voz (la graba Dot; Desktop no la tiene).
+      'voice.append',
+      'voice.begin',
+      'voice.cancel',
+      'voice.end',
       // M22: los vigilantes del asistente (listar, pausar, reanudar y quitar). `watches.add` exige `approve` y no va.
       'watches.list',
       'watches.pause',
@@ -539,6 +547,10 @@ describe('el lado nativo', () => {
       'SessionsGet',
       'SessionsMemory',
       'SessionsOpen',
+      'VoiceAppend',
+      'VoiceBegin',
+      'VoiceCancel',
+      'VoiceEnd',
       'WatchesList',
       'WatchesPause',
       'WatchesRemove',

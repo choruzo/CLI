@@ -32,6 +32,8 @@
 //!    crecer; las que no pueden perderse (cerrar, reintentar, `attach`, foco)
 //!    no ocupan cola: se anotan y se coalescen.
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -94,6 +96,9 @@ pub struct Timings {
     pub dream_timeout: Duration,
     /// M23 — `doctor.run` prueba el provider (hasta 3 s) y el runtime de contenedores.
     pub doctor_timeout: Duration,
+    /// M25 fase 4 — `voice.end`: la primera nota arranca el worker y carga el
+    /// modelo (~13 s medidos) y comparte cola con las notas de Telegram.
+    pub voice_timeout: Duration,
     /// Modo código — la pregunta lateral llama al modelo (el daemon la corta a los 2 minutos).
     pub ask_timeout: Duration,
     pub handshake_timeout: Duration,
@@ -115,6 +120,7 @@ impl Default for Timings {
             fresh_timeout: Duration::from_secs(10 * 60),
             dream_timeout: Duration::from_secs(5 * 60),
             doctor_timeout: Duration::from_secs(30),
+            voice_timeout: Duration::from_secs(120),
             ask_timeout: Duration::from_secs(150),
             handshake_timeout: Duration::from_secs(5),
             daemon_start_wait: Duration::from_secs(10),
@@ -212,6 +218,11 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::WatchesPause,
     MainMethod::WatchesResume,
     MainMethod::WatchesRemove,
+    // M25 fase 4: la voz (el audio lo graba Dot; Desktop no la tiene).
+    MainMethod::VoiceBegin,
+    MainMethod::VoiceAppend,
+    MainMethod::VoiceEnd,
+    MainMethod::VoiceCancel,
 ];
 
 const DESKTOP_METHODS: &[MainMethod] = &[
@@ -1539,6 +1550,59 @@ fn call_request_as(
                 json!({ "sessionId": session_id }),
             ))
         }
+        // M25 fase 4 — la voz. El PCM viaja en base64; aquí solo se mira la forma
+        // (no vacío, par y ≤ 64 KiB). El `seq` consecutivo y el tope de 300 s los
+        // lleva el daemon, que es quien contesta el error.
+        CallAction::VoiceBegin { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((
+                MainMethod::VoiceBegin,
+                json!({ "sessionId": session_id, "operationId": operation_id }),
+            ))
+        }
+        CallAction::VoiceAppend {
+            upload_id,
+            seq,
+            pcm,
+        } => {
+            if !valid_id(upload_id) {
+                return Err(invalid("Invalid upload id."));
+            }
+            // PCM16: un número **par** de bytes y, como mucho, un trozo de 2 s.
+            // (`% 2` y no `is_multiple_of`: el crate declara MSRV 1.77.)
+            if pcm.is_empty() || pcm.len() % 2 != 0 || pcm.len() > MAX_VOICE_CHUNK_BYTES {
+                return Err(invalid("Invalid audio chunk."));
+            }
+            Ok((
+                MainMethod::VoiceAppend,
+                json!({
+                    "uploadId": upload_id,
+                    "seq": seq,
+                    "pcm": BASE64.encode(pcm),
+                    "operationId": operation_id,
+                }),
+            ))
+        }
+        CallAction::VoiceEnd { upload_id } => {
+            if !valid_id(upload_id) {
+                return Err(invalid("Invalid upload id."));
+            }
+            Ok((
+                MainMethod::VoiceEnd,
+                json!({ "uploadId": upload_id, "operationId": operation_id }),
+            ))
+        }
+        CallAction::VoiceCancel { upload_id } => {
+            if !valid_id(upload_id) {
+                return Err(invalid("Invalid upload id."));
+            }
+            Ok((
+                MainMethod::VoiceCancel,
+                json!({ "uploadId": upload_id, "operationId": operation_id }),
+            ))
+        }
         CallAction::BrowserNavigate {
             session_id,
             action,
@@ -1604,6 +1668,10 @@ const MAX_BROWSER_URL_CHARS: usize = 2048;
 
 /// Tope del desplazamiento de `images.get` (`SHARED_IMAGE_LIMITS`: 5 MB).
 const MAX_IMAGE_OFFSET: u64 = 5 * 1024 * 1024;
+
+/// Tope de un trozo de `voice.append` (`VOICE_UPLOAD_LIMITS.chunkBytes`): 2 s de
+/// PCM16 a 16 kHz.
+const MAX_VOICE_CHUNK_BYTES: usize = 65_536;
 
 /// Un id de imagen compartida: `AAAAMMDDTHHMMSSZ-` y 16 hex en minúscula.
 pub(crate) fn valid_image_id(id: &str) -> bool {
@@ -2835,6 +2903,9 @@ impl Actor {
                                 | CallAction::GitChanges { .. }
                                 | CallAction::GitDiff { .. }
                                 | CallAction::BrowserScreen { .. }
+                                // M25 fase 4: un trozo de audio, aunque solo fuera su
+                                // tamaño. El audio no va al log, nunca.
+                                | CallAction::VoiceAppend { .. }
                         ) {
                             self.cfg.logger.info(&format!("call: {}", action.name()));
                         }
@@ -2846,6 +2917,8 @@ impl Actor {
                             CallAction::NewCompanionConversation => self.cfg.timings.fresh_timeout,
                             CallAction::MemoryDream { .. } => self.cfg.timings.dream_timeout,
                             CallAction::DoctorRun => self.cfg.timings.doctor_timeout,
+                            // La primera nota arranca el worker y carga el modelo.
+                            CallAction::VoiceEnd { .. } => self.cfg.timings.voice_timeout,
                             CallAction::AskSession { .. } => self.cfg.timings.ask_timeout,
                             _ => self.cfg.timings.request_timeout,
                         };
@@ -3625,9 +3698,7 @@ mod tests {
         );
         assert!(undo.mutating());
         for bad in ["".to_string(), "x".repeat(MAX_ID_CHARS + 1)] {
-            assert!(
-                call_request(&CallAction::MemoryUndoChange { change_id: bad }, "op").is_err()
-            );
+            assert!(call_request(&CallAction::MemoryUndoChange { change_id: bad }, "op").is_err());
         }
         assert_eq!(
             call_request_as(&ClientProfile::DESKTOP, &undo, "op-19")
@@ -3845,6 +3916,118 @@ mod tests {
             assert!(DOT_METHODS.contains(&m), "{m:?}");
             assert!(!DESKTOP_METHODS.contains(&m), "{m:?}");
         }
+    }
+
+    #[test]
+    fn una_nota_de_voz_lleva_el_audio_en_base64_y_solo_sale_desde_dot() {
+        // Abrir la nota: la sesión solo dice en qué traza se anota.
+        let begin = CallAction::VoiceBegin {
+            session_id: "ses_1".into(),
+        };
+        let (method, params) = call_request(&begin, "op-20").unwrap();
+        assert_eq!(method, MainMethod::VoiceBegin);
+        assert_eq!(
+            params,
+            json!({ "sessionId": "ses_1", "operationId": "op-20" })
+        );
+        assert!(begin.mutating());
+        assert!(call_request(
+            &CallAction::VoiceBegin {
+                session_id: String::new()
+            },
+            "op"
+        )
+        .is_err());
+
+        // Un trozo: PCM16 LE crudo entra, base64 sale (con su `seq`).
+        let append = CallAction::VoiceAppend {
+            upload_id: "upl_1".into(),
+            seq: 0,
+            pcm: b"hell".to_vec(),
+        };
+        let (method, params) = call_request(&append, "op-21").unwrap();
+        assert_eq!(method, MainMethod::VoiceAppend);
+        assert_eq!(
+            params,
+            json!({ "uploadId": "upl_1", "seq": 0, "pcm": "aGVsbA==", "operationId": "op-21" })
+        );
+        assert!(append.mutating());
+        let full = CallAction::VoiceAppend {
+            upload_id: "upl_1".into(),
+            seq: 3,
+            pcm: vec![0u8; 65_536],
+        };
+        assert_eq!(
+            call_request(&full, "op").unwrap().1["seq"],
+            json!(3),
+            "un trozo del tope entero se envía"
+        );
+        // Lo que no es PCM16 mono (vacío, impar o más de 64 KiB) no sale.
+        for pcm in [
+            Vec::new(),
+            vec![0u8, 1, 2],
+            vec![7u8; 65_537],
+            vec![7u8; 65_538],
+        ] {
+            let bad = CallAction::VoiceAppend {
+                upload_id: "upl_1".into(),
+                seq: 0,
+                pcm,
+            };
+            assert!(call_request(&bad, "op").is_err(), "trozo inválido");
+        }
+        assert!(call_request(
+            &CallAction::VoiceAppend {
+                upload_id: String::new(),
+                seq: 0,
+                pcm: b"hell".to_vec(),
+            },
+            "op"
+        )
+        .is_err());
+
+        // Cerrar y tirar: sin audio, con su id.
+        for (action, expected) in [
+            (
+                CallAction::VoiceEnd {
+                    upload_id: "upl_1".into(),
+                },
+                MainMethod::VoiceEnd,
+            ),
+            (
+                CallAction::VoiceCancel {
+                    upload_id: "upl_1".into(),
+                },
+                MainMethod::VoiceCancel,
+            ),
+        ] {
+            let (method, params) = call_request(&action, "op-22").unwrap();
+            assert_eq!(method, expected);
+            assert_eq!(
+                params,
+                json!({ "uploadId": "upl_1", "operationId": "op-22" })
+            );
+            assert!(action.mutating());
+        }
+        assert!(call_request(
+            &CallAction::VoiceEnd {
+                upload_id: String::new()
+            },
+            "op"
+        )
+        .is_err());
+        // Los cuatro son de Dot (Desktop no graba notas) y solo de su perfil.
+        for method in [
+            MainMethod::VoiceBegin,
+            MainMethod::VoiceAppend,
+            MainMethod::VoiceEnd,
+            MainMethod::VoiceCancel,
+        ] {
+            assert!(DOT_METHODS.contains(&method));
+            assert!(!DESKTOP_METHODS.contains(&method));
+        }
+        // Transcribir la primera nota arranca el worker: no es una orden corta.
+        assert!(Timings::default().voice_timeout >= Duration::from_secs(120));
     }
 
     #[test]

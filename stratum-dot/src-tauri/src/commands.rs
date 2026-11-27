@@ -20,7 +20,7 @@
 //! van directos: es lo mismo que hace el runtime cuando nadie contesta.
 //!
 //! Lo que devuelven `dot_open_session`, `dot_start_run`, `dot_list_agents`,
-//! `dot_list_models`, `dot_box_*` y `dot_routines_*` es el `result` del daemon **sin interpretar**: un DTO del
+//! `dot_list_models`, `dot_box_*`, `dot_routines_*` y `dot_voice_stop` es el `result` del daemon **sin interpretar**: un DTO del
 //! protocolo que el webview valida contra el contrato antes de usarlo.
 
 use dot_link::{
@@ -994,6 +994,53 @@ pub fn dot_set_attention<R: Runtime>(
     state
         .ask
         .set_waiting(approvals.saturating_add(questions).saturating_add(plans));
+}
+
+/// M25 fase 4 — empezar a grabar una nota. Solo desde `main` y **solo con la
+/// ventana visible y con el foco**: el webview no recibe el audio, así que lo
+/// único que puede hacer es pedir una nota mientras la persona está delante (y
+/// al perder el foco se cancela, `lib.rs`). El micrófono se abre en el acto.
+#[tauri::command]
+pub async fn dot_voice_start<R: Runtime>(
+    window: WebviewWindow<R>,
+    state: State<'_, DotState>,
+    session_id: String,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    if !window.is_visible().unwrap_or(false) || !window.is_focused().unwrap_or(false) {
+        return Err(CommandError::new(
+            CommandErrorKind::NotSent,
+            "The window has to be visible and focused to record.",
+        ));
+    }
+    state.voice.start(&session_id).await
+}
+
+/// M25 fase 4 — terminar la nota: para el micrófono, sube el resto y el daemon
+/// transcribe en local. Devuelve lo que contesta, **sin interpretar**.
+#[tauri::command]
+pub async fn dot_voice_stop<R: Runtime>(
+    window: WebviewWindow<R>,
+    state: State<'_, DotState>,
+) -> Result<Value, CommandError> {
+    main_window(&window)?;
+    let transcribed = state.voice.stop().await;
+    if transcribed.is_err() {
+        // El motivo va al log; el audio, nunca.
+        state.logger.warn("voice: the note was not transcribed");
+    }
+    transcribed
+}
+
+/// M25 fase 4 — tirar la nota: ni transcripción ni audio. Perder el foco o salir
+/// de Dot también la tiran (`lib.rs`).
+#[tauri::command]
+pub async fn dot_voice_cancel<R: Runtime>(
+    window: WebviewWindow<R>,
+    state: State<'_, DotState>,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    state.voice.cancel().await
 }
 
 /// `Esc`: quita la ventana de en medio. Con bandeja se oculta; sin ella se

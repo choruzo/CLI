@@ -1245,7 +1245,10 @@ async fn el_diagnostico_se_pide_por_la_principal_y_desktop_no_lo_tiene() {
     assert_eq!(report["report"]["checks"][0]["id"], "daemon.up");
     assert_eq!(report["report"]["checks"][1]["status"], "warn");
     let requests = fake.requests();
-    let sent = requests.iter().find(|r| r["method"] == "doctor.run").unwrap();
+    let sent = requests
+        .iter()
+        .find(|r| r["method"] == "doctor.run")
+        .unwrap();
     assert!(sent["params"].get("operationId").is_none());
     // Desktop no tiene el diagnóstico.
     let before = fake.requests().len();

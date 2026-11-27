@@ -29,6 +29,7 @@ mod page;
 mod tray;
 mod unlock;
 mod updates;
+mod voice;
 
 use dot_link::approver::ApproverTimings;
 use dot_link::discovery::default_endpoint_dir;
@@ -64,6 +65,8 @@ pub struct DotState {
     pub tray: Option<tray::Tray>,
     /// El Dot compacto abierto ahora (su `nonce`) y lo que espera a la persona.
     pub ask: ask::AskPrompt,
+    /// M25 fase 4 — la nota de voz: el micrófono lo abre y lo lee este lado.
+    pub voice: voice::VoiceRecorder<LinkHandle>,
 }
 
 /// Trae la ventana al frente (desde la bandeja, o al abrir Dot por segunda vez).
@@ -172,6 +175,9 @@ pub fn run() {
             commands::dot_set_attention,
             commands::dot_hide,
             commands::dot_quit,
+            commands::dot_voice_start,
+            commands::dot_voice_stop,
+            commands::dot_voice_cancel,
             updates::dot_update_check,
             updates::dot_update_install,
         ])
@@ -201,6 +207,16 @@ pub fn run() {
                     }
                 }
                 return;
+            }
+            // M25 fase 4 — perder el foco con una nota en curso la cancela: el
+            // micrófono solo se abre con la ventana delante, y así no se queda
+            // escuchando a escondidas (el audio se tira, sin transcribir).
+            if let WindowEvent::Focused(false) = event {
+                if window.label() == "main" {
+                    if let Some(state) = window.try_state::<DotState>() {
+                        state.voice.abort();
+                    }
+                }
             }
             // M16: el foco poco después de mostrar la notificación de una rutina es
             // «la pulsó»: se abre esa sesión (solo se selecciona). Ver `notify.rs`.
@@ -298,6 +314,14 @@ pub fn run() {
             });
 
             let tray = tray::build(&handle, &logger);
+            // M25 fase 4 — la nota de voz. Mientras graba, la bandeja lo dice.
+            let voice = {
+                let tray_app = handle.clone();
+                let listening: voice::Listener = Arc::new(move |listening: bool| {
+                    tray::set_listening(&tray_app, listening)
+                });
+                voice::VoiceRecorder::new(link.clone(), logger.clone(), Some(listening))
+            };
             app.manage(DotState {
                 link,
                 broker,
@@ -308,6 +332,7 @@ pub fn run() {
                 logger: logger.clone(),
                 tray,
                 ask: ask::AskPrompt::default(),
+                voice,
             });
             // Si otra aplicación ya tiene el atajo, se dice en el log y la bandeja sigue sirviendo.
             {
@@ -329,6 +354,9 @@ pub fn run() {
                 // resolver lo pendiente. La autoridad de aprobar se va con Dot.
                 if let Some(state) = app.try_state::<DotState>() {
                     state.prompt.clear();
+                    // Una nota a medias no sobrevive a Dot: el micrófono se cierra
+                    // y el audio se tira (no hay a dónde mandarlo).
+                    state.voice.abort();
                     // Una confirmación abierta no sobrevive a Dot: no se envía.
                     state.confirm.invalidate(CancelReason::Closing);
                     state.broker.shutdown();

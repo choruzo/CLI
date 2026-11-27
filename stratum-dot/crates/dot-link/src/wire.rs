@@ -154,10 +154,18 @@ pub enum MainMethod {
     JobsBackground,
     /// Desktop (modo código) — los `STRATUM.md` que ve la sesión (`observe`).
     MemoryDocuments,
+    /// M25 fase 4 (Dot) — una nota de voz: el audio que se graba en el equipo
+    /// sube por trozos y el daemon lo transcribe en local. Cuatro métodos con la
+    /// capacidad `control`, y el resultado solo lo ve quien los pide: no hay
+    /// eventos. El audio **nunca** va a un log (`docs/protocol.md` §35).
+    VoiceBegin,
+    VoiceAppend,
+    VoiceEnd,
+    VoiceCancel,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 66] = [
+    pub const ALL: [MainMethod; 70] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -224,6 +232,10 @@ impl MainMethod {
         MainMethod::SessionsTurns,
         MainMethod::JobsBackground,
         MainMethod::MemoryDocuments,
+        MainMethod::VoiceBegin,
+        MainMethod::VoiceAppend,
+        MainMethod::VoiceEnd,
+        MainMethod::VoiceCancel,
     ];
 }
 
@@ -296,6 +308,10 @@ impl WireMethod for MainMethod {
             MainMethod::SessionsTurns => "sessions.turns",
             MainMethod::JobsBackground => "jobs.background",
             MainMethod::MemoryDocuments => "memory.documents",
+            MainMethod::VoiceBegin => "voice.begin",
+            MainMethod::VoiceAppend => "voice.append",
+            MainMethod::VoiceEnd => "voice.end",
+            MainMethod::VoiceCancel => "voice.cancel",
         }
     }
 }
@@ -541,7 +557,11 @@ mod tests {
                 "sessions.ask",
                 "sessions.turns",
                 "jobs.background",
-                "memory.documents"
+                "memory.documents",
+                "voice.begin",
+                "voice.append",
+                "voice.end",
+                "voice.cancel"
             ]
         );
         for forbidden in [

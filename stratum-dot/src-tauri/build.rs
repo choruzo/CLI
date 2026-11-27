@@ -67,6 +67,9 @@ const COMMANDS: &[&str] = &[
     "dot_quit",
     "dot_update_check",
     "dot_update_install",
+    "dot_voice_start",
+    "dot_voice_stop",
+    "dot_voice_cancel",
 ];
 
 fn main() {
