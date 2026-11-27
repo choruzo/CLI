@@ -1905,7 +1905,10 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'voice.end': z.object({
     transcript: z.object({
       text: z.string().max(20_000),
-      durationSec: z.number().nonnegative().max(VOICE_UPLOAD_LIMITS.maxSeconds + 1),
+      durationSec: z
+        .number()
+        .nonnegative()
+        .max(VOICE_UPLOAD_LIMITS.maxSeconds + 1),
       capped: z.boolean(),
       device: z.enum(['gpu', 'cpu', 'unconfirmed']),
     }),

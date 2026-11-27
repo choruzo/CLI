@@ -404,7 +404,9 @@ describe('secciones solo globales (M25: voz)', () => {
     const projectFile = join(dir, 'project.json');
     writeJson(globalFile, { voice: { enabled: true, language: 'en', device: 'gpu' } });
     // Un repo clonado no elige el dispositivo ni enciende lo que baja 4 GB.
-    const project = { voice: { enabled: false, language: 'de', device: 'cpu', idleUnloadMinutes: 2 } };
+    const project = {
+      voice: { enabled: false, language: 'de', device: 'cpu', idleUnloadMinutes: 2 },
+    };
 
     const merged = validateConfigLayer(projectFile, project, globalFile);
     expect(merged.voice).toEqual({
@@ -416,9 +418,9 @@ describe('secciones solo globales (M25: voz)', () => {
     // La capa de entrada no se toca.
     expect(project.voice.enabled).toBe(false);
 
-    expect(
-      validateConfigLayer(globalFile, { voice: { device: 'cpu' } }, globalFile).voice,
-    ).toEqual({ enabled: false, language: 'es', device: 'cpu', idleUnloadMinutes: 10 });
+    expect(validateConfigLayer(globalFile, { voice: { device: 'cpu' } }, globalFile).voice).toEqual(
+      { enabled: false, language: 'es', device: 'cpu', idleUnloadMinutes: 10 },
+    );
   });
 
   it('loadConfig no aplica la voz de un repo clonado', () => {

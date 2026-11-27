@@ -21,7 +21,7 @@
 import { randomBytes } from 'crypto';
 import { ProtocolError } from '../ipc/codec.js';
 import { VOICE_UPLOAD_LIMITS, type ProtocolVoiceTranscript } from '../protocol/model.js';
-import type { VoiceNoteResult } from './voice-notes.js';
+import { VOICE_MAX_WAITING, type VoiceNoteResult } from './voice-notes.js';
 
 /** Lo único que se le pide a las notas de voz: transcribir PCM ya a 16 kHz. */
 export interface VoicePcmTranscriber {
@@ -47,8 +47,17 @@ export interface VoiceUploadTimer {
   unref?: () => void;
 }
 
+/**
+ * Subidas abiertas a la vez en todo el daemon, sumando todas las conexiones: lo
+ * que cabe en la cola de transcripción (1 activa + 3 en espera). Cada una puede
+ * llegar a 9,6 MB, así que sin tope muchas conexiones juntarían mucha memoria.
+ */
+export const VOICE_MAX_OPEN_UPLOADS = 1 + VOICE_MAX_WAITING;
+
 export interface VoiceUploadsOptions {
   transcriber: VoicePcmTranscriber;
+  /** Tope global de subidas abiertas. Por defecto, {@link VOICE_MAX_OPEN_UPLOADS}. */
+  maxOpen?: number;
   limits?: VoiceUploadLimits;
   setTimer?: (fire: () => void, ms: number) => VoiceUploadTimer;
   clearTimer?: (timer: VoiceUploadTimer) => void;
@@ -137,7 +146,8 @@ export class VoiceUploads {
   /**
    * Abre una subida para esa conexión, tirando la que tuviera abierta.
    *
-   * @throws ProtocolError `UNAVAILABLE` (`voice-closed`) si ya se cerró.
+   * @throws ProtocolError `UNAVAILABLE` (`voice-closed`) si ya se cerró, o
+   *   (`voice-busy`) si ya hay {@link VOICE_MAX_OPEN_UPLOADS} abiertas en otras conexiones.
    */
   begin(
     connId: number,
@@ -150,6 +160,11 @@ export class VoiceUploads {
     }
     // Una subida abierta por conexión: abrir otra tira la anterior.
     this.dropConnection(connId);
+    if (this.open.size >= (this.opts.maxOpen ?? VOICE_MAX_OPEN_UPLOADS)) {
+      throw new ProtocolError('UNAVAILABLE', 'Too many recordings at once.', {
+        reason: 'voice-busy',
+      });
+    }
     const upload: Upload = {
       id: this.randomId(),
       connId,

@@ -2698,7 +2698,9 @@ interface ProtocolVoiceTranscript {
   - `UNAVAILABLE` con `reason`: `voice-disabled` (`voice.enabled` apagado), `voice-model-missing`
     (el modelo no está `ready`: se descarga con `stratum voice download`; desde aquí **nunca** se
     descarga) o `voice-closed` (el daemon se apaga);
-  - **una subida abierta por conexión**: abrir otra tira la anterior.
+  - **una subida abierta por conexión**: abrir otra tira la anterior;
+  - como mucho 4 abiertas en todo el daemon (lo que cabe en la cola de transcripción): la
+    siguiente es `UNAVAILABLE` (`voice-busy`).
 - **`voice.append`**:
   - `seq` empieza en 0 y es consecutivo; un hueco o una repetición es `INVALID_PARAMS`
     (`voice-seq`) y la subida se tira;

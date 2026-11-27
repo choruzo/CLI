@@ -3,6 +3,7 @@ import { ProtocolError } from '../ipc/codec.js';
 import { VOICE_UPLOAD_LIMITS } from '../protocol/model.js';
 import type { VoiceNoteResult } from './voice-notes.js';
 import {
+  VOICE_MAX_OPEN_UPLOADS,
   VoiceUploads,
   type VoiceUploadLimits,
   type VoiceUploadTimer,
@@ -179,6 +180,21 @@ describe('VoiceUploads (M25 fase 4)', () => {
       'NOT_FOUND',
     );
     expect(() => h.uploads.append(1, second.uploadId, 0, base64Pcm(ONE_SECOND))).not.toThrow();
+  });
+
+  it('como mucho VOICE_MAX_OPEN_UPLOADS abiertas en todo el daemon: la siguiente es voice-busy', () => {
+    const h = harness();
+    for (let conn = 1; conn <= VOICE_MAX_OPEN_UPLOADS; conn++) h.uploads.begin(conn, 'ses_1');
+    let reason: unknown;
+    try {
+      h.uploads.begin(99, 'ses_1');
+    } catch (err) {
+      reason = (err as ProtocolError).data?.reason;
+    }
+    expect(reason).toBe('voice-busy');
+    // Reabrir desde una conexión que ya tiene una no suma: sustituye.
+    expect(() => h.uploads.begin(1, 'ses_1')).not.toThrow();
+    expect(h.uploads.count).toBe(VOICE_MAX_OPEN_UPLOADS);
   });
 
   it('append acumula los trozos y cuenta los segundos', () => {
