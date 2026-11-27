@@ -2,7 +2,7 @@
  * El Dot compacto (PRD de Dot §8.2), de verdad y en su ventana: la app compilada
  * contra un `stratumd` real que aloja al `companion`.
  *
- *   Ctrl+Alt+Space (pulsado en el sistema) → ventana compacta, en su origen y sin IPC
+ *   Ctrl+Alt+D (pulsado en el sistema) → ventana compacta, en su origen y sin IPC
  *             → Enter: el texto va al asistente (un run, o steering) y sale la principal
  *             → Esc, o el atajo otra vez, la cierra sin enviar nada
  *
@@ -216,9 +216,9 @@ function pressShortcut() {
     "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class K { [DllImport(\"user32.dll\")] public static extern void keybd_event(byte b, byte s, uint f, UIntPtr e); }'",
     '[K]::keybd_event(0x11,0,0,[UIntPtr]::Zero)',
     '[K]::keybd_event(0x12,0,0,[UIntPtr]::Zero)',
-    '[K]::keybd_event(0x20,0,0,[UIntPtr]::Zero)',
+    '[K]::keybd_event(0x44,0,0,[UIntPtr]::Zero)',
     'Start-Sleep -Milliseconds 60',
-    '[K]::keybd_event(0x20,0,2,[UIntPtr]::Zero)',
+    '[K]::keybd_event(0x44,0,2,[UIntPtr]::Zero)',
     '[K]::keybd_event(0x12,0,2,[UIntPtr]::Zero)',
     '[K]::keybd_event(0x11,0,2,[UIntPtr]::Zero)',
   ].join('; ');
@@ -253,7 +253,7 @@ try {
     await session.waitForElement('.assistant .messages', { timeout: 40_000 });
   });
 
-  await check('Ctrl+Alt+Space abre el Dot compacto: otra ventana, en su origen y sin IPC', async () => {
+  await check('Ctrl+Alt+D abre el Dot compacto: otra ventana, en su origen y sin IPC', async () => {
     await openCompact();
     assert.match(await session.execute('return location.origin'), /dot-ask/);
     const invoked = await session.execute(`

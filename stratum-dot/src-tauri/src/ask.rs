@@ -2,7 +2,7 @@
 //! asistente sin abrir la principal.
 //!
 //! ```text
-//! Ctrl+Alt+Space / bandeja ──► ventana «ask» ── POST dot-ask://localhost/send ──► este fichero
+//! Ctrl+Alt+D / bandeja    ──► ventana «ask» ── POST dot-ask://localhost/send ──► este fichero
 //!                               (otro origen,                                     │
 //!                                sin IPC,                                         ▼
 //!                                página propia)           `dot://event` { type: 'ask', text } a «main»
@@ -48,7 +48,9 @@ pub const SCHEME: &str = "dot-ask";
 /// Etiqueta de su ventana: la única de la que se acepta un mensaje.
 pub const WINDOW: &str = "ask";
 /// El atajo global que la abre (o la cierra), y que mantenido graba una nota.
-pub const SHORTCUT: &str = "CommandOrControl+Alt+Space";
+/// Era `Ctrl+Alt+Space`, que también usa la app de Claude de escritorio: al
+/// pulsarlo saltaban las dos (cambiado por el usuario el 2026-11-27).
+pub const SHORTCUT: &str = "CommandOrControl+Alt+D";
 
 const PAGE: &str = include_str!("../ask/index.html");
 const SCRIPT: &str = include_str!("../ask/ask.js");

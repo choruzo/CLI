@@ -1354,7 +1354,7 @@ gobierna el daemon.
   su memoria (`docs/protocol.md` §22.1). Dot sigue sin `sessions.close`: no puede cerrar ninguna
   sesión. Sin respuesta, «Result unknown» y se vuelve a pedir la del asistente (la que haya), sin
   repetir la orden. El panel *Memory* enseña lo heredado aparte, en «This conversation».
-- **Dot compacto** (PRD §8.2): `Ctrl+Alt+Space` (`Cmd+Alt+Space` en macOS) o *Ask your
+- **Dot compacto** (PRD §8.2): `Ctrl+Alt+D` (`Cmd+Alt+D` en macOS; hasta el 2026-11-27 era `Ctrl+Alt+Space`, que también usa la app de Claude de escritorio) o *Ask your
   assistant…* en la bandeja abren una ventana flotante sin marco, siempre encima y sin icono en la
   barra de tareas. Se cierra con `Esc`, con el atajo otra vez o al perder el foco. Enseña cuántas
   solicitudes esperan (solo el número). `Enter` entrega el texto y abre la principal en el

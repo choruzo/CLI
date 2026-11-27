@@ -3184,7 +3184,7 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
        revisarlo**, no se envía solo. *Diseño propuesto por Claude el mismo día y aceptado por el
        usuario* (también el riesgo acotado del botón y que Dot no descargue el modelo):
        - **Gestos**:
-         - **Atajo** `Ctrl+Alt+Space`. Un toque sigue abriendo el Dot compacto, como hoy.
+         - **Atajo** `Ctrl+Alt+D` (*cambiado por el usuario el 2026-11-27*: `Ctrl+Alt+Space` lo usa también la app de Claude de escritorio). Un toque sigue abriendo el Dot compacto, como hoy.
            Mantenido más de **300 ms**, abre el compacto en «Listening…» y graba hasta soltarlo.
            Las repeticiones de tecla del SO no cuentan. `Esc` mientras graba cancela y tira el
            audio.
