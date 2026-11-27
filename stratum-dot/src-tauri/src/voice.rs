@@ -707,7 +707,10 @@ impl<U: VoiceUploads> VoiceRecorder<U> {
     /// `voice.begin` a la vez. Lo grabado antes de tener el `uploadId` no se
     /// pierde: espera en memoria y se sube primero.
     pub async fn start(&self, session_id: &str) -> Result<(), CommandError> {
-        if self.is_recording() {
+        // El candado se tiene hasta apuntar la nota (aquí no hay ningún `await`):
+        // dos `start` a la vez no pueden abrir el micrófono dos veces.
+        let mut slot = lock(&self.active);
+        if slot.is_some() {
             return Err(CommandError::new(
                 CommandErrorKind::Invalid,
                 "A note is already being recorded.",
@@ -753,7 +756,7 @@ impl<U: VoiceUploads> VoiceRecorder<U> {
             session_id.to_string(),
             self.logger.clone(),
         ));
-        *lock(&self.active) = Some(Active { shared, pump });
+        *slot = Some(Active { shared, pump });
         Ok(())
     }
 
@@ -1505,6 +1508,103 @@ mod tests {
         println!(
             "3 s captured: {} samples; RMS {dbfs:.1} dBFS",
             samples.len()
+        );
+    }
+
+    /// Lo mismo que `real_mic_probe`, pero con un micrófono **elegido por nombre**
+    /// (`DOT_VOICE_PROBE_DEVICE`, un trozo del nombre) y pasando por la mezcla a
+    /// mono y el remuestreo de verdad. Lista los dispositivos de entrada. A mano:
+    /// `DOT_VOICE_PROBE_DEVICE=reSpeaker cargo test -p stratum-dot real_mic_probe_named -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_mic_probe_named() {
+        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+        let wanted = std::env::var("DOT_VOICE_PROBE_DEVICE").unwrap_or_default();
+        let host = cpal::default_host();
+        let mut chosen = None;
+        for device in host.input_devices().expect("no input devices") {
+            let name = device.name().unwrap_or_default();
+            println!("input: {name}");
+            if chosen.is_none() && !wanted.is_empty() && name.contains(&wanted) {
+                chosen = Some(device);
+            }
+        }
+        let Some(device) = chosen else {
+            println!("no input device matches {wanted:?}");
+            return;
+        };
+        let supported = device.default_input_config().expect("no input config");
+        let rate = supported.sample_rate().0;
+        let channels = supported.channels().max(1) as usize;
+        let format = supported.sample_format();
+        let config: cpal::StreamConfig = supported.into();
+        let captured: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let stream = match format {
+            cpal::SampleFormat::I16 => device.build_input_stream(
+                &config,
+                move |frames: &[i16], _: &_| lock(&sink).extend(mono_i16(frames, channels)),
+                |_| {},
+                None,
+            ),
+            cpal::SampleFormat::F32 => device.build_input_stream(
+                &config,
+                move |frames: &[f32], _: &_| lock(&sink).extend(mono_f32(frames, channels)),
+                |_| {},
+                None,
+            ),
+            other => panic!("format {other:?} not covered by the probe"),
+        }
+        .expect("the microphone did not open");
+        stream.play().expect("the microphone did not start");
+        let secs = std::env::var("DOT_VOICE_PROBE_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3u64);
+        std::thread::sleep(Duration::from_secs(secs));
+        drop(stream);
+        let mono = lock(&captured).clone();
+        let at16k = if rate == CAPTURE_SAMPLE_RATE {
+            let mut resampler = VoiceResampler::new();
+            let mut out = Vec::new();
+            resampler.push(&mono, &mut out);
+            resampler.finish(&mut out);
+            out
+        } else {
+            mono.clone()
+        };
+        let sum: f32 = at16k.iter().map(|sample| sample * sample).sum();
+        let rms = (sum / at16k.len().max(1) as f32).sqrt();
+        // Solo en esta prueba manual y solo si se pide: el WAV de 16 kHz, para
+        // pasarlo luego por `voice.*`. El código de Dot nunca escribe audio.
+        if let Ok(path) = std::env::var("DOT_VOICE_PROBE_WAV") {
+            let pcm: Vec<i16> = at16k
+                .iter()
+                .map(|s| (s * 32_767.0).round().clamp(-32_768.0, 32_767.0) as i16)
+                .collect();
+            let data = pcm_bytes(&pcm);
+            let mut wav = Vec::with_capacity(44 + data.len());
+            wav.extend_from_slice(b"RIFF");
+            wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+            wav.extend_from_slice(b"WAVEfmt ");
+            wav.extend_from_slice(&16u32.to_le_bytes());
+            wav.extend_from_slice(&1u16.to_le_bytes());
+            wav.extend_from_slice(&1u16.to_le_bytes());
+            wav.extend_from_slice(&TARGET_SAMPLE_RATE.to_le_bytes());
+            wav.extend_from_slice(&(TARGET_SAMPLE_RATE * 2).to_le_bytes());
+            wav.extend_from_slice(&2u16.to_le_bytes());
+            wav.extend_from_slice(&16u16.to_le_bytes());
+            wav.extend_from_slice(b"data");
+            wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            wav.extend_from_slice(&data);
+            std::fs::write(&path, wav).expect("could not write the probe WAV");
+        }
+        println!("chosen: {rate} Hz, {channels} channel(s), {format:?}");
+        println!(
+            "{secs} s captured: {} samples at {rate} Hz, {} at 16 kHz; RMS {:.1} dBFS",
+            mono.len(),
+            at16k.len(),
+            20.0 * rms.max(1e-9).log10()
         );
     }
 }
