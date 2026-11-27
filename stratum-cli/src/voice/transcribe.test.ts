@@ -10,7 +10,7 @@ import {
   VoiceTooLongError,
   type TranscribeEngine,
 } from './transcribe.js';
-import type { VoiceDeviceInUse } from './worker-protocol.js';
+import type { VoiceTranscriptDevice } from './worker-protocol.js';
 
 const SR = VOICE_SAMPLE_RATE;
 
@@ -36,7 +36,7 @@ function fakeEngine(
   opts: {
     texts?: string[];
     capped?: boolean;
-    device?: VoiceDeviceInUse;
+    device?: VoiceTranscriptDevice;
   } = {},
 ): TranscribeEngine & { calls: Float32Array[] } {
   const calls: Float32Array[] = [];
@@ -128,8 +128,8 @@ describe('transcribePcm', () => {
     // Todo mudo: no se llama al motor, pero la transcripción termina.
     expect(result.text).toBe('');
     expect(engine.calls).toHaveLength(0);
-    // Y sin encoder no hay dispositivo que confirmar: ni `gpu` ni `cpu`.
-    expect(result.device).toBe('unconfirmed');
+    // El dispositivo lo decidió la sonda al cargar: vale también con todo mudo.
+    expect(result.device).toBe('cpu');
     expect(result.warning).toBeUndefined();
 
     const over = new Float32Array(VOICE_MAX_SECONDS * SR + 1);

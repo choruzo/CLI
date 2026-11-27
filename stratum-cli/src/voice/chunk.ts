@@ -254,10 +254,16 @@ export function chunk(samples: Float32Array, opts: ChunkOptions = {}): AudioChun
 /**
  * Umbral de «casi mudo», en dBFS de RMS.
  *
- * **Provisional**: es el punto de partida de la fase 2 y se medirá después, con
- * voz baja de verdad, para no tirar voz de la persona. No lo ajustes a ojo.
+ * Medido el 2026-11-27 (fase 2): el trozo con voz más flojo de la batería (voz
+ * atenuada −30 dB con ruido leve) tenía su trama más alta a −52,3 dBFS, y con
+ * −50 se tiraban 6 de 40 trozos de voz baja que el motor transcribía bien. Con
+ * −58 no se tira ninguno y el silencio con siseo leve sigue fuera.
+ *
+ * **Provisional**: falta probarlo con notas reales de Telegram (voz baja y
+ * breve, varios teléfonos). No lo cubre todo: un fondo de radio o tele sin
+ * nadie hablando supera cualquier umbral de energía y el motor puede inventar.
  */
-export const NEAR_SILENT_DBFS = -50;
+export const NEAR_SILENT_DBFS = -58;
 
 /**
  * ¿Es casi mudo el trozo `[start, end)`? Sí cuando **ninguna** trama de ~30 ms

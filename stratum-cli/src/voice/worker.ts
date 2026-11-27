@@ -71,9 +71,9 @@ async function initialize(request: WorkerInitRequest): Promise<void> {
   }
   const ready: WorkerReadyMessage = {
     t: 'ready',
-    // Con WebGPU, al cargar todavía no hay nada confirmado: lo dirá el primer
-    // encoder real en cada `result`.
-    device: engine.loadedDevice === 'gpu' ? 'gpu-unconfirmed' : 'cpu',
+    // Lo que dijo la sonda al cargar: `gpu` solo confirmado.
+    device:
+      engine.device === 'gpu' ? 'gpu' : engine.device === 'unconfirmed' ? 'gpu-unconfirmed' : 'cpu',
     loadMs: engine.loadMs,
   };
   if (engine.warning !== undefined) ready.warning = engine.warning;

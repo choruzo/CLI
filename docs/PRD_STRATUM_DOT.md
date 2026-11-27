@@ -3119,9 +3119,40 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
        con el modelo real (descarga verificada, `es_00` en GPU en ~2,2 s y una nota de 63 s en
        6,9 s). Decidido por Claude, cambiable: al cargar no se recalcula el SHA-256 (~75 s por
        arranque); se comprueban tamaño, `mtime` e `ino` frente a la marca y que no haya enlaces,
-       y el SHA completo se calcula al descargar y con `status --verify`. *Falta*: lo de medir
-       (memoria de la GPU, RSS, repetibilidad) y fijar con esa medida `NEAR_SILENT_DBFS` (−50) y
-       `GPU_CONFIRM_MAX_ENCODER_RTF` (0,1), que siguen provisionales.
+       y el SHA completo se calcula al descargar y con `status --verify`.
+
+       *Medido el 2026-11-27*. Lo midió DeepSeek con el worker y el motor reales, y lo revisó
+       Codex `gpt-6.2-sol` recalculando los resultados guardados. El informe está en el
+       scratchpad, en `asr/fase2/`:
+       - **Repetibilidad**: 3 pasadas × 8 notas × 3 condiciones dan **24 de 24 transcripciones
+         idénticas**, con WER de 2,55 / 5,58 / 4,74 % y RTF de 0,080–0,089.
+       - **Trozo casi mudo**: `NEAR_SILENT_DBFS` pasa de −50 a **−58 dBFS** (provisional).
+         - El trozo con voz más flojo de la batería (voz a −30 dB con ruido leve) da −52,3 dBFS,
+           y con −50 se tiraban 6 de 40 trozos de voz baja que el motor transcribía bien.
+         - El control con silencio añadido pasa del 17,1 % al 2,4 %.
+         - **No lo cubre**: una radio o una tele de fondo sin nadie hablando (−26,5 dBFS)
+           supera cualquier umbral de energía, y el motor inventó una frase.
+         - Falta probarlo con notas reales de Telegram (voz baja y breve, varios teléfonos).
+       - **Confirmar la GPU**: el primer `encoder.run` tras cargar cuesta 0,5–0,7 s fijos, así
+         que medir el primer trozo real fallaba en los dos sentidos. Lo reconocía el primer
+         diseño, y con trozos de 2–5 s marcaba como `cpu` arranques en GPU.
+         - Ahora hay una **sonda fija al cargar**: 15 s de ruido leve determinista que pasan dos
+           veces por el preprocesador y el encoder. La primera pasada calienta y la segunda se
+           mide.
+         - La GPU se confirma con un RTF ≤ **0,03**; si no, el dispositivo se da como
+           `unconfirmed` (`gpu-unconfirmed` en el `ready`), nunca como `gpu` ni como `cpu`.
+         - Vale igual para una nota de un solo trozo o con todos los trozos mudos.
+         - Comprobado con el modelo real en procesos nuevos: sonda de 0,0076–0,0087 con la GPU
+           libre y de 0,0146 con dos cargas a la vez. La CPU daba 0,085 o más con 15 s.
+         - La carga, con la sonda incluida, tarda unos 8 s.
+         - Sigue provisional: falta otro equipo y un fallback silencioso reproducible.
+       - **VRAM**: +4,5 GB al cargar, que se devuelven enteros al cerrar el worker. Entre notas
+         no se libera: el pico del sistema sube de 7,0 a 8,0 GB en 10 notas.
+         - Con WDDM no hay memoria por proceso, solo el total del sistema.
+         - Falta una prueba sostenida (la misma nota muchas veces y duraciones intercaladas)
+           para saber si se estabiliza: con notas seguidas, el worker puede vivir horas.
+       - **RSS del worker**: unos 290 MB en el `ready` y de 321 a 442 MB tras 10 notas en GPU.
+         En CPU, de 4,1 a 4,9 GB. El proceso padre ocupa 100–250 MB.
     3. Notas de Telegram en el `companion`, con su eco, su marca y su traza.
     4. *Push-to-talk* en Dot: el audio por el protocolo como las imágenes (`images.*`, a trozos).
        Se diseña aparte.

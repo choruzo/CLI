@@ -10,7 +10,6 @@
 
 import { chunk, isNearSilent, NEAR_SILENT_DBFS, type ChunkReason } from './chunk.js';
 import type {
-  VoiceDeviceInUse,
   VoiceTranscript,
   VoiceTranscriptChunk,
   VoiceTranscriptDevice,
@@ -24,7 +23,7 @@ export const VOICE_MAX_SECONDS = 300;
 
 /** Lo que se le pide al motor (lo cumple `CanaryEngine`; los tests pasan uno falso). */
 export interface TranscribeEngine {
-  readonly device: VoiceDeviceInUse;
+  readonly device: VoiceTranscriptDevice;
   readonly warning?: string;
   transcribe(
     pcm16k: Float32Array,
@@ -86,8 +85,6 @@ export async function transcribePcm(
   const texts: string[] = [];
   const chunks: VoiceTranscriptChunk[] = [];
   let capped = false;
-  /** ¿Se llegó a ejecutar el encoder en algún trozo? Sin eso no hay confirmación. */
-  let ranEncoder = false;
   for (const window of windows) {
     const reason: ChunkReason = window.reason;
     if (
@@ -103,7 +100,6 @@ export async function transcribePcm(
     const slice = pcm16k.subarray(window.start, window.end);
     const t0 = now();
     const result = await engine.transcribe(slice, { language: opts.language });
-    ranEncoder = true;
     const ms = now() - t0;
     if (result.text.trim() !== '') texts.push(result.text);
     if (result.capped) capped = true;
@@ -119,9 +115,9 @@ export async function transcribePcm(
 
   // Un solo espacio entre trozos, sin espacios dobles.
   const text = texts.join(' ').replace(/\s+/g, ' ').trim();
-  // Todo mudo: no se ejecutó el encoder, así que no hay dispositivo que
-  // confirmar. Se dice `unconfirmed` en vez de mentir con el que se pidió.
-  const device: VoiceTranscriptDevice = ranEncoder ? engine.device : 'unconfirmed';
+  // El dispositivo lo decidió la sonda al cargar (o el paso a la CPU), así que
+  // vale también para una nota con un solo trozo o con todos mudos.
+  const device: VoiceTranscriptDevice = engine.device;
 
   return {
     text,

@@ -234,8 +234,17 @@ describe('chunk (opciones inválidas)', () => {
 });
 
 describe('isNearSilent (filtro de trozos casi mudos)', () => {
-  it('el umbral es provisional y está a −50 dBFS', () => {
-    expect(NEAR_SILENT_DBFS).toBe(-50);
+  it('el umbral, medido en la fase 2, está a −58 dBFS', () => {
+    expect(NEAR_SILENT_DBFS).toBe(-58);
+  });
+
+  it('la voz más baja medida (−52 dBFS) no es casi muda; −60 dBFS sí', () => {
+    // Un seno de RMS r tiene amplitud r·√2.
+    const atDbfs = (db: number): Float32Array => tone(2, 220, 10 ** (db / 20) * Math.SQRT2);
+    const low = atDbfs(-52.3);
+    expect(isNearSilent(low, 0, low.length)).toBe(false);
+    const hiss = atDbfs(-60);
+    expect(isNearSilent(hiss, 0, hiss.length)).toBe(true);
   });
 
   it('un silencio digital (RMS 0) es casi mudo', () => {

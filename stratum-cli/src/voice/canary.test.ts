@@ -9,6 +9,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   CANARY_SAMPLE_RATE,
+  GPU_CONFIRM_MAX_ENCODER_RTF,
+  GPU_PROBE_SECONDS,
   loadCanaryEngine,
   MAX_TOTAL_TOKENS,
   type OrtModule,
@@ -134,6 +136,7 @@ function fakeOrt(control: FakeOrtControl): OrtModule {
 }
 
 describe('paso a la CPU cuando WebGPU falla al ejecutar', () => {
+  // Las dos primeras ejecuciones del encoder en WebGPU son la sonda de la carga.
   let modelDir: string;
   beforeEach(() => {
     modelDir = mkdtempSync(join(tmpdir(), 'stratum-canary-'));
@@ -149,7 +152,7 @@ describe('paso a la CPU cuando WebGPU falla al ejecutar', () => {
   const now = (): number => 1_000;
 
   it('con auto, un fallo en un trozo **posterior** también pasa a la CPU y repite ese trozo', async () => {
-    const control: FakeOrtControl = { failGpuEncoderRun: 2, created: [], released: [] };
+    const control: FakeOrtControl = { failGpuEncoderRun: 4, created: [], released: [] };
     const engine = await loadCanaryEngine({
       dir: modelDir,
       device: 'auto',
@@ -180,7 +183,7 @@ describe('paso a la CPU cuando WebGPU falla al ejecutar', () => {
 
   it('si el par de CPU no se puede crear entero, el motor queda inservible', async () => {
     const control: FakeOrtControl = {
-      failGpuEncoderRun: 1,
+      failGpuEncoderRun: 3,
       failCpuDecoderCreate: true,
       created: [],
       released: [],
@@ -201,7 +204,7 @@ describe('paso a la CPU cuando WebGPU falla al ejecutar', () => {
   });
 
   it('con gpu explícito, el fallo se propaga sin pasar a la CPU', async () => {
-    const control: FakeOrtControl = { failGpuEncoderRun: 1, created: [], released: [] };
+    const control: FakeOrtControl = { failGpuEncoderRun: 3, created: [], released: [] };
     const engine = await loadCanaryEngine({
       dir: modelDir,
       device: 'gpu',
@@ -212,5 +215,62 @@ describe('paso a la CPU cuando WebGPU falla al ejecutar', () => {
     expect(control.created.some((id) => id.endsWith('@cpu') && !id.startsWith('nemo128'))).toBe(
       false,
     );
+  });
+});
+
+describe('la sonda de la GPU al cargar', () => {
+  let modelDir: string;
+  beforeEach(() => {
+    modelDir = mkdtempSync(join(tmpdir(), 'stratum-canary-'));
+    writeFileSync(
+      join(modelDir, 'vocab.txt'),
+      VOCAB.map((token, index) => `${token} ${index}`).join('\n'),
+    );
+  });
+  afterEach(() => rmSync(modelDir, { recursive: true, force: true }));
+
+  const load = (control: FakeOrtControl, device: 'auto' | 'gpu' | 'cpu', now: () => number) =>
+    loadCanaryEngine({ dir: modelDir, device, ort: fakeOrt(control), now });
+
+  it('una sonda rápida confirma la GPU antes de la primera nota', async () => {
+    const engine = await load({ created: [], released: [] }, 'auto', () => 1_000);
+    expect(engine.device).toBe('gpu');
+    expect(engine.probeRtf).toBe(0);
+    expect(GPU_PROBE_SECONDS).toBe(15);
+  });
+
+  it("una sonda lenta deja la GPU sin confirmar (nunca 'gpu') y lo avisa", async () => {
+    // Cada lectura del reloj avanza 1 s: la sonda de 15 s sale a RTF 1/15 > 0,03.
+    let clock = 0;
+    const engine = await load({ created: [], released: [] }, 'auto', () => (clock += 1_000));
+    expect(GPU_CONFIRM_MAX_ENCODER_RTF).toBe(0.03);
+    expect(engine.device).toBe('unconfirmed');
+    expect(engine.loadedDevice).toBe('gpu');
+    expect(engine.warning).toMatch(/no se ha confirmado/);
+  });
+
+  it('con auto, si la sonda revienta, se carga en la CPU', async () => {
+    const control: FakeOrtControl = { failGpuEncoderRun: 1, created: [], released: [] };
+    const engine = await load(control, 'auto', () => 1_000);
+    expect(engine.device).toBe('cpu');
+    expect(engine.loadedDevice).toBe('cpu');
+    expect(engine.warning).toMatch(/sonda/);
+    expect(engine.probeRtf).toBeUndefined();
+    expect(control.released).toEqual(
+      expect.arrayContaining(['encoder-model.onnx@webgpu', 'decoder-model.onnx@webgpu']),
+    );
+  });
+
+  it('con gpu explícito, si la sonda revienta, la carga falla', async () => {
+    const control: FakeOrtControl = { failGpuEncoderRun: 1, created: [], released: [] };
+    await expect(load(control, 'gpu', () => 1_000)).rejects.toThrow(/dispositivo perdido/);
+  });
+
+  it('en CPU no hay sonda', async () => {
+    const control: FakeOrtControl = { created: [], released: [] };
+    const engine = await load(control, 'cpu', () => 1_000);
+    expect(engine.device).toBe('cpu');
+    expect(engine.probeRtf).toBeUndefined();
+    expect(control.created.some((id) => id.endsWith('@webgpu'))).toBe(false);
   });
 });

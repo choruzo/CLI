@@ -26,14 +26,34 @@ export const MAX_TOTAL_TOKENS = 1024;
 export const CANARY_SAMPLE_RATE = 16_000;
 
 /**
- * RTF del encoder por encima del cual la GPU **no** se da por buena.
+ * RTF (preprocesador + encoder ÷ duración) de la **sonda** por encima del cual
+ * la GPU **no** se da por confirmada.
  *
- * **Provisional**: es un punto de partida para detectar la caída silenciosa a la
- * CPU de ONNX Runtime (en la RTX 5060 Ti medida, el RTF del encoder con WebGPU
- * era de 0,083-0,088 y en CPU 0,32-0,41). Se afina cuando se mida la memoria y
- * la repetibilidad con el dispositivo real confirmado.
+ * Medido el 2026-11-27 (fase 2, RTX 5060 Ti): el primer `encoder.run` tras
+ * cargar cuesta 0,5-0,7 s fijos sea cual sea el trozo, así que medir el primer
+ * trozo real no sirve (con 2-5 s, la GPU salía como CPU). En caliente, con 15 s,
+ * la GPU da 0,0076 libre y hasta 0,0137 con otro proceso WebGPU compitiendo; la
+ * CPU, 0,085 o más. **Provisional**: la sonda en sí está pendiente de validar en
+ * otros equipos y con un fallback silencioso reproducible.
  */
-export const GPU_CONFIRM_MAX_ENCODER_RTF = 0.1;
+export const GPU_CONFIRM_MAX_ENCODER_RTF = 0.03;
+
+/** Duración de la sonda de la GPU: con 15 s se separan GPU y CPU (con 2-5 s, no). */
+export const GPU_PROBE_SECONDS = 15;
+
+/**
+ * La sonda: 15 s de ruido leve y determinista (siempre el mismo), para que el
+ * coste no dependa de la nota. Solo pasa por el preprocesador y el encoder.
+ */
+function probeSignal(): Float32Array {
+  const samples = new Float32Array(GPU_PROBE_SECONDS * CANARY_SAMPLE_RATE);
+  let state = 0x2545f491;
+  for (let i = 0; i < samples.length; i++) {
+    state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+    samples[i] = (state / 0xffff_ffff - 0.5) * 0.02;
+  }
+  return samples;
+}
 
 // ---------------------------------------------------------------------------
 // Lo mínimo de `onnxruntime-node` que se usa (el paquete es opcional y no trae
@@ -79,6 +99,12 @@ export interface CanaryTranscription {
 
 export type VoiceDeviceChoice = 'auto' | 'gpu' | 'cpu';
 export type VoiceDeviceInUse = 'gpu' | 'cpu';
+/**
+ * Lo que se sabe del dispositivo: `gpu` solo si la sonda lo confirmó;
+ * `unconfirmed` si las sesiones son de WebGPU pero la sonda salió lenta (puede
+ * que ONNX Runtime cayera a la CPU sin avisar, o que la GPU estuviera ocupada).
+ */
+export type VoiceDeviceStatus = 'gpu' | 'cpu' | 'unconfirmed';
 
 /**
  * Tope de tokens de salida de **un trozo**, sin contar el prefijo: 12 por
@@ -91,14 +117,12 @@ export function outputTokenCap(samples: number, sampleRate: number): number {
 }
 
 export interface CanaryEngine {
-  /** El dispositivo **confirmado** (nunca `gpu` sin comprobarlo). */
-  readonly device: VoiceDeviceInUse;
-  /**
-   * El dispositivo con el que se crearon las sesiones al cargar. Con WebGPU es
-   * `gpu` y todavía **no** significa confirmado: es lo que el worker anuncia
-   * como `gpu-unconfirmed` en el `ready`.
-   */
+  /** El dispositivo, ya decidido al cargar con la sonda (nunca `gpu` sin confirmarlo). */
+  readonly device: VoiceDeviceStatus;
+  /** El dispositivo con el que se crearon las sesiones al cargar. */
   readonly loadedDevice: VoiceDeviceInUse;
+  /** RTF de la segunda pasada de la sonda; `undefined` si no hubo sonda (CPU). */
+  readonly probeRtf?: number;
   /** Por qué no se usa lo que se pidió, si hubo que cambiar. */
   readonly warning?: string;
   readonly loadMs: number;
@@ -165,6 +189,51 @@ export async function loadCanaryEngine(opts: LoadCanaryEngineOptions): Promise<C
   }
   if (!enc || !dec) throw new Error('canary: faltan las sesiones del encoder o del decoder');
 
+  // Sonda de la GPU, al cargar: una pasada de calentamiento (compila los
+  // kernels) y otra medida, sobre la misma señal fija y sin decoder. Así la GPU
+  // se confirma antes de la primera nota, tenga uno o varios trozos.
+  let device: VoiceDeviceStatus = created;
+  let probeRtf: number | undefined;
+  if (created === 'gpu') {
+    const probe = probeSignal();
+    const runProbe = async (): Promise<number> => {
+      const t0 = now();
+      const out = await pre.run({
+        waveforms: new ort.Tensor('float32', probe, [1, probe.length]),
+        waveforms_lens: new ort.Tensor('int64', BigInt64Array.from([BigInt(probe.length)]), [1]),
+      });
+      await enc!.run({ audio_signal: out.features, length: out.features_lens });
+      return now() - t0;
+    };
+    try {
+      await runProbe();
+      probeRtf = (await runProbe()) / (GPU_PROBE_SECONDS * 1000);
+    } catch (err) {
+      // WebGPU creó las sesiones pero no corre: con `auto`, a la CPU; con
+      // `gpu`, se dice.
+      if (wanted !== 'auto') throw err;
+      await releaseQuietly(enc);
+      await releaseQuietly(dec);
+      enc = undefined;
+      dec = undefined;
+      await createPair('cpu');
+      created = 'cpu';
+      device = 'cpu';
+      warning = `la GPU ha fallado en la sonda (${errorMessage(err)}); se transcribe en la CPU`;
+    }
+    if (probeRtf !== undefined) {
+      if (probeRtf <= GPU_CONFIRM_MAX_ENCODER_RTF) {
+        device = 'gpu';
+      } else {
+        device = 'unconfirmed';
+        warning =
+          `la GPU no se ha confirmado (RTF de la sonda ${probeRtf.toFixed(4)} > ` +
+          `${GPU_CONFIRM_MAX_ENCODER_RTF}); puede estar corriendo en la CPU`;
+      }
+    }
+  }
+  if (!enc || !dec) throw new Error('canary: faltan las sesiones del encoder o del decoder');
+
   const loadMs = now() - started;
   const vocab = readVocab(join(dir, 'vocab.txt'));
   const idOf = (token: string): number => {
@@ -193,9 +262,8 @@ export async function loadCanaryEngine(opts: LoadCanaryEngineOptions): Promise<C
     idOf('<|nodiarize|>'),
   ];
 
-  let confirmed: VoiceDeviceInUse = created;
+  let confirmed: VoiceDeviceStatus = device;
   let runtimeWarning = warning;
-  let gpuChecked = false;
   /** Ya se cayó a la CPU en tiempo de ejecución: no se reintenta. */
   let fellBack = false;
   /** El paso a la CPU falló a medias: el motor no sirve y el worker debe tirarse. */
@@ -213,24 +281,6 @@ export async function loadCanaryEngine(opts: LoadCanaryEngineOptions): Promise<C
       length: preOut.features_lens,
     });
     const tEnc = now();
-
-    // ONNX Runtime puede caer a la CPU sin avisar: la GPU no se da por buena
-    // hasta que el primer encoder la confirma. El tiempo medido es el mismo que
-    // se informa como `encMs` (preprocesador + encoder), que es con el que se
-    // midieron los RTF de referencia en la fase 1.
-    if (confirmed === 'gpu' && !gpuChecked) {
-      gpuChecked = true;
-      const audioMs = (pcm16k.length / CANARY_SAMPLE_RATE) * 1000;
-      const rtf = audioMs > 0 ? (tEnc - t0) / audioMs : Number.POSITIVE_INFINITY;
-      if (rtf > GPU_CONFIRM_MAX_ENCODER_RTF) {
-        // Solo cambia la etiqueta: el resultado ya calculado es correcto y las
-        // sesiones no se recrean.
-        confirmed = 'cpu';
-        runtimeWarning =
-          `la GPU no se ha confirmado (RTF del encoder ${rtf.toFixed(3)} > ` +
-          `${GPU_CONFIRM_MAX_ENCODER_RTF}); se informa cpu`;
-      }
-    }
 
     const tokens = prefixFor(language);
     const prefix = tokens.length;
@@ -292,7 +342,10 @@ export async function loadCanaryEngine(opts: LoadCanaryEngineOptions): Promise<C
     get warning() {
       return runtimeWarning;
     },
-    loadedDevice: created,
+    get loadedDevice() {
+      return created;
+    },
+    ...(probeRtf !== undefined ? { probeRtf } : {}),
     loadMs,
 
     async transcribe(pcm16k, { language }) {
@@ -333,7 +386,6 @@ export async function loadCanaryEngine(opts: LoadCanaryEngineOptions): Promise<C
         fellBack = true;
         created = 'cpu';
         confirmed = 'cpu';
-        gpuChecked = true;
         runtimeWarning = `la GPU ha fallado al ejecutar (${errorMessage(err)}); se transcribe en la CPU`;
         return runChunk(pcm16k, language);
       }

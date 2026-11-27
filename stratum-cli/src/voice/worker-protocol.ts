@@ -10,22 +10,21 @@
 
 export type VoiceDeviceChoice = 'auto' | 'gpu' | 'cpu';
 
-/**
- * El dispositivo **confirmado**: solo se dice `gpu` cuando el primer encoder
- * real lo ha sido (RTF por debajo de `GPU_CONFIRM_MAX_ENCODER_RTF`).
- */
+/** Con qué se crearon las sesiones. */
 export type VoiceDeviceInUse = 'gpu' | 'cpu';
 
 /**
- * Lo que dice el `ready`, recién cargado el modelo. Con WebGPU todavía **no**
- * está confirmado: que ONNX Runtime cree la sesión no prueba que la GPU corra
- * (puede caer a la CPU sin avisar). Se confirma con el primer encoder real.
+ * Lo que dice el `ready`. Al cargar, con WebGPU, el worker pasa una **sonda**
+ * fija de 15 s por el encoder (calentamiento y medida): `gpu` solo si su RTF
+ * queda por debajo de `GPU_CONFIRM_MAX_ENCODER_RTF`. Si no, `gpu-unconfirmed`:
+ * las sesiones son de WebGPU, pero puede que ONNX Runtime cayera a la CPU sin
+ * avisar o que la GPU estuviera ocupada.
  */
-export type VoiceReadyDevice = 'gpu-unconfirmed' | 'cpu';
+export type VoiceReadyDevice = 'gpu' | 'gpu-unconfirmed' | 'cpu';
 
 /**
- * El dispositivo de un `result`. `unconfirmed` es que no se ejecutó ningún
- * encoder porque todos los trozos eran casi mudos: no hay nada que confirmar.
+ * El dispositivo de un `result`: el de la sonda, o `cpu` si WebGPU falló al
+ * ejecutar y se pasó a la CPU. `unconfirmed` equivale a `gpu-unconfirmed`.
  */
 export type VoiceTranscriptDevice = 'gpu' | 'cpu' | 'unconfirmed';
 
