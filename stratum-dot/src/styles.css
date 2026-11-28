@@ -870,6 +870,67 @@ p {
   opacity: 0.55;
 }
 
+/* M25 fase 4: el micro. Mantener pulsado graba; soltar lo pasa a texto. */
+.composer-voice {
+  margin: 0.35rem 0 0;
+}
+.composer-voice.bad {
+  color: var(--bad);
+}
+.btn.voice {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Cuadrado y redondo, del alto que sale un `.btn` con su relleno y su línea. */
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  /* El gesto es mantener, no arrastrar la página. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.btn.voice .voice-icon {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+}
+.btn.voice:hover:not(:disabled) {
+  color: var(--text);
+}
+.btn.voice[data-state='listening'] {
+  background: #e0685c;
+  border-color: #e0685c;
+  color: #fff;
+  animation: voice-halo 1.4s ease-out infinite;
+}
+.btn.voice[data-state='transcribing'] {
+  color: var(--accent);
+  animation: voice-blink 1s steps(2, start) infinite;
+}
+@keyframes voice-halo {
+  from {
+    box-shadow: 0 0 0 0 rgba(224, 104, 92, 0.55);
+  }
+  to {
+    box-shadow: 0 0 0 0.45rem rgba(224, 104, 92, 0);
+  }
+}
+@keyframes voice-blink {
+  50% {
+    opacity: 0.4;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn.voice[data-state='listening'],
+  .btn.voice[data-state='transcribing'] {
+    animation: none;
+  }
+}
+
 .newchat-form {
   display: flex;
   flex-direction: column;

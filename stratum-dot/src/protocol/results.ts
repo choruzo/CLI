@@ -233,3 +233,13 @@ export function parseConnectorChange(raw: unknown): { connector: ProtocolConnect
   const parsed = RESULTS['connectors.disable'].safeParse(raw);
   return parsed.success ? parsed.data : null;
 }
+
+/** M25 fase 4 — `voice.end`: lo que se dijo (el audio no llega al webview) y si se cortó por el tope. */
+export function parseVoiceTranscript(
+  raw: unknown,
+): { text: string; durationSec: number; capped: boolean } | null {
+  const parsed = RESULTS['voice.end'].safeParse(raw);
+  if (!parsed.success) return null;
+  const { text, durationSec, capped } = parsed.data.transcript;
+  return { text, durationSec, capped };
+}
