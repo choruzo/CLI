@@ -113,6 +113,7 @@ function voiceMarker(seconds, capped) {
   function setVoiceState(state) {
     voiceState = state;
     voice.hidden = state === 'idle';
+    document.body.dataset.voice = state;
   }
 
   function showListening(seconds, level) {
@@ -123,6 +124,7 @@ function voiceMarker(seconds, capped) {
     const dbfs = typeof level === 'number' ? level : -60;
     const filled = Math.max(0, Math.min(1, (dbfs + 60) / 60));
     voiceLevel.style.width = (filled * 100).toFixed(1) + '%';
+    document.body.style.setProperty('--level', filled.toFixed(3));
   }
 
   function showTranscribing() {

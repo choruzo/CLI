@@ -1,56 +1,242 @@
-/* Dot compacto: lo que cambia respecto a la hoja común de las páginas nativas. */
+/* Dot compacto: lo que cambia respecto a la hoja común de las páginas nativas.
+   Una paleta de comandos: cabecera mínima, el campo como pieza central con el
+   micro dentro y, abajo, una sola línea que es el aviso, la nota o los atajos. */
+body.ask {
+  --live: #e0685c;
+  --ok: #4caf7a;
+  --field: #1a1a1a;
+  height: 100vh;
+  overflow: hidden;
+  background: linear-gradient(180deg, #141414 0%, var(--bg) 100%);
+}
+@media (prefers-color-scheme: light) {
+  body.ask {
+    --live: #c4473a;
+    --field: #ffffff;
+    background: var(--bg);
+  }
+}
 body.ask main {
-  padding: 0.6rem 0.8rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0.7rem 0.85rem 0.6rem;
   max-width: none;
 }
+
+/* ------------------------------------------------------------ cabecera */
 body.ask header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  margin-bottom: 0.4rem;
-  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
 }
 body.ask .brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.45rem;
+  font-weight: 600;
+}
+body.ask .brand .muted {
+  font-weight: 400;
 }
 body.ask .dot {
-  width: 0.55rem;
-  height: 0.55rem;
+  width: 0.5rem;
+  height: 0.5rem;
   border-radius: 50%;
-  background: #4caf7a;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent);
 }
 body.ask .waiting {
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
   font-weight: 600;
-  color: #d9a441;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* ------------------------------------------------------------ el campo */
+body.ask form {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+body.ask .field {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--field);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+body.ask .field:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 body.ask textarea {
-  width: 100%;
-  box-sizing: border-box;
+  flex: 1;
+  height: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
   resize: none;
+  background: transparent;
+  color: var(--text);
   font: inherit;
-  padding: 0.45rem 0.55rem;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+body.ask textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+body.ask textarea:disabled {
+  opacity: 0.6;
+}
+
+/* El micro: apagado en reposo, rojo y latiendo mientras escucha, ámbar mientras
+   transcribe. El halo crece con el nivel (`--level`, 0..1, lo pone ask.js). */
+body.ask .mic {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  margin-top: -0.1rem;
+  border-radius: 50%;
+  isolation: isolate;
+  color: var(--muted);
+  transition:
+    color 140ms ease,
+    background 140ms ease;
+}
+body.ask .mic::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--live);
+  opacity: 0;
+  transform: scale(1);
+  transition:
+    transform 120ms linear,
+    opacity 120ms linear;
+  z-index: -1;
+}
+body.ask .mic svg {
+  position: relative;
+}
+body.ask[data-voice='listening'] .mic {
+  color: #fff;
+  background: var(--live);
+}
+body.ask[data-voice='listening'] .mic::after {
+  opacity: 0.28;
+  transform: scale(calc(1 + var(--level, 0) * 0.7));
+}
+body.ask[data-voice='listening'] .field {
+  border-color: color-mix(in srgb, var(--live) 70%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 16%, transparent);
+}
+body.ask[data-voice='transcribing'] .mic {
+  color: var(--accent);
+  animation: ask-breathe 1.1s ease-in-out infinite;
+}
+
+/* ------------------------------------------------------------ la línea de abajo */
+body.ask footer {
+  display: flex;
+  align-items: center;
+  min-height: 1.5rem;
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+}
+body.ask footer p {
+  margin: 0;
 }
 body.ask .status {
   min-height: 0;
-  margin: 0.25rem 0 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
 }
 body.ask .status:empty {
   display: none;
 }
-body.ask .small {
-  margin: 0.3rem 0 0;
+body.ask .status.bad {
+  color: var(--bad);
 }
+body.ask .status.bad::before {
+  content: '!';
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--bg);
+  background: var(--bad);
+}
+
+/* Lo que pasa ahora (el aviso o la nota) tapa los atajos. */
+body.ask footer:has(.status:not(:empty)) .hint,
+body.ask footer:has(.voice:not([hidden])) .hint {
+  display: none;
+}
+body.ask footer:has(.voice:not([hidden])) .status {
+  display: none;
+}
+
+body.ask .hint {
+  flex: 1;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+body.ask .hint > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+body.ask kbd {
+  padding: 0 0.3rem;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.7rem;
+  line-height: 1.25rem;
+  color: var(--text);
+  background: var(--panel);
+}
+body.ask .hint .talk {
+  margin-left: auto;
+}
+
 /* M25 fase 4: la nota. La fila solo está mientras se escucha o se transcribe. */
 body.ask .voice {
+  flex: 1;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin: 0.3rem 0 0;
-  font-size: 0.82rem;
-  color: var(--muted);
+  gap: 0.6rem;
+  color: var(--text);
 }
 body.ask .voice[hidden] {
   display: none;
@@ -61,8 +247,8 @@ body.ask .voice-label {
 }
 body.ask .voice-bar {
   flex: 1;
-  height: 0.3rem;
-  border-radius: 0.15rem;
+  height: 0.25rem;
+  border-radius: 999px;
   background: var(--line);
   overflow: hidden;
 }
@@ -71,9 +257,36 @@ body.ask .voice-bar > span {
   width: 0;
   height: 100%;
   border-radius: inherit;
-  background: #4caf7a;
+  background: var(--live);
   transition: width 120ms linear;
 }
+body.ask[data-voice='transcribing'] .voice-bar > span {
+  width: 35% !important;
+  background: var(--accent);
+  animation: ask-sweep 1.2s ease-in-out infinite;
+}
+
+@keyframes ask-breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes ask-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(290%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.ask *,
+  body.ask *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
