@@ -225,5 +225,6 @@ describe('jobs y subagentes', () => {
     expect(() => process.kill(childJob.pid!, 0)).toThrow();
     // Al padre no se le avisa de un job que no era suyo.
     expect(events.some((e) => e.type === 'job_notice')).toBe(false);
-  });
+   // Lanza y mata procesos de verdad: con la suite entera pasa de los 5 s por defecto.
+  }, 30_000);
 });

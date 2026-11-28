@@ -29,8 +29,9 @@ function newBase(): string {
   return base;
 }
 
-// Con la suite entera en paralelo, la primera pasada del monitor tarda más de 10 s.
-async function until(check: () => boolean, timeoutMs = 30_000): Promise<void> {
+// Con la suite entera en paralelo, la primera pasada del monitor tarda más de 10 s
+// (y en la release de la 0.17.0, más de 30 s dos veces seguidas).
+async function until(check: () => boolean, timeoutMs = 60_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!check()) {
     if (Date.now() > deadline) throw new Error('timeout waiting for condition');
@@ -132,7 +133,7 @@ describe('M23 — avisos de degradación del daemon', () => {
       detail: 'Token rechazado',
       fix: 'stratum connectors setup cuenta',
     });
-  }, 90_000);
+  }, 150_000);
 
   it('con `health: null` no hay monitor', async () => {
     const base = newBase();

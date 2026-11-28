@@ -410,7 +410,9 @@ describe('VoiceWorkerClient: el plazo cubre el arranque y la generación del hij
       dir: '/no/existe',
       language: 'es',
       idleUnloadMinutes: 10,
-      requestTimeoutMs: 50,
+      // Holgado: el mismo plazo cubre también la petición del hijo nuevo, que con
+      // la suite entera en paralelo puede tardar más de 50 ms en llegar al `die`.
+      requestTimeoutMs: 1_000,
       spawnWorker: () => {
         const child =
           children.length === 0
