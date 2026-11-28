@@ -3237,6 +3237,12 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
        - **Partes**: (1) protocolo y daemon (`voice.*` y `VoiceNotes.transcribePcm`); (2) grabación
          nativa y `dot-link`; (3) el atajo y el Dot compacto; (4) el botón del chat; (5) E2E, docs
          y release (Dot 0.4.1 con la revisión 3).
+
+         *Hechas las partes 1–4 el 2026-11-28* y probadas por el usuario con un micro real (atajo y
+         botón). Al probar salieron dos cosas: `Ctrl+Alt+Space` chocaba con la app de Claude (de ahí
+         `Ctrl+Alt+D`) y un interbloqueo entre el candado de la nota y el hilo principal colgaba Dot
+         al mantener el atajo (arreglado con una reserva aparte y su test). El compacto se rediseñó
+         como paleta de comandos. Soltar el botón fuera de él cancela, como dice el gesto.
     5. *Palabra de activación y distinguir hablantes*: pasan a **M29** (*2026-11-27*), porque con
        varias personas «quién habla» toca la memoria, la conversación, los conectores y las
        aprobaciones, no solo la voz.

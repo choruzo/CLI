@@ -1372,6 +1372,28 @@ gobierna el daemon.
   nativo: el webview no tiene su permiso. Tests: `src-tauri/src/ask.rs`, `tests/architecture.test.ts`,
   `src/app/AssistantHome.test.tsx` y, en la ventana real, `e2e/ask.e2e.mjs` (`npm run e2e:ask`,
   solo Windows: pulsa el atajo con `keybd_event`, así que no hay que tocar el teclado mientras corre).
+- **Notas de voz** (M25 fase 4, PRD §23.11; protocolo §35, revisión 3). Se habla de dos formas, y
+  en las dos el texto va **al campo para revisarlo**, nunca se envía solo:
+  - **Atajo mantenido**: un toque de `Ctrl+Alt+D` abre el compacto como siempre; mantenerlo más de
+    300 ms lo abre en «Listening…» con la barra de nivel y graba hasta soltarlo; luego
+    «Transcribing…» y el texto en su campo. `Esc` mientras graba tira la nota. Mientras graba o
+    transcribe, el compacto no se cierra al perder el foco.
+  - **Botón de micro** junto a *Send* en el campo del chat (asistente y cabina): se mantiene pulsado
+    (o `Espacio`/`Enter` con el foco en él) y se suelta para transcribir. Soltar fuera del botón,
+    perder el foco de la ventana o cambiar de vista tira la nota.
+  - Lo que ya hubiera escrito se queda delante y el cursor va al final. Al enviar, el mensaje lleva
+    delante `[nota de voz, M:SS]` (`, recortada` si llegó a 300 s) **solo si el texto dictado sigue
+    tal cual** en el campo: si se corrige, lo enviado ya es de la persona y va sin marca.
+  - Menos de 0,5 s no se transcribe. Si el modelo no está, se dice que se descargue con
+    `stratum voice download`: Dot no lo descarga. Una nota a la vez, como mucho 300 s.
+- **Cómo está hecho**: graba **el lado nativo** (`src-tauri/src/voice.rs`, `cpal` sobre WASAPI, el
+  micro por defecto del SO), lo pasa a PCM16 mono a 16 kHz y lo va subiendo al daemon con
+  `voice.begin|append|end|cancel` mientras se graba. El audio nunca va a disco, al log ni a un
+  webview. El webview principal solo puede **pedir** una nota (`dot_voice_start|stop|cancel`), y
+  solo con la ventana visible y con el foco; al perderlo, el nativo la tira. Recibe el `result` de
+  `voice.end` sin interpretar y lo valida con el schema del contrato. El compacto sigue sin IPC: su
+  página pregunta el estado a `dot-ask` (`GET /voice`, cada 150 ms) y solo ve segundos, nivel y el
+  texto final. Mientras graba, la bandeja dice «listening…».
 
 Tests: `src/app/Assistant.test.tsx`, `src/app/AssistantHome.test.tsx` (inicio, pestañas y
 conversación nueva), `la_caja_solo_se_consulta_arranca_o_para_y_solo_desde_dot`
