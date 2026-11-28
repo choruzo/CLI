@@ -248,10 +248,16 @@ export const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer
     void startVoice();
   };
 
-  const onVoicePointerUp = () => {
+  const onVoicePointerUp = (event: PointerEvent<HTMLButtonElement>) => {
     if (!held.current) return;
     held.current = false;
-    void stopVoice();
+    // Salir del botón cancela (PRD §23, M25 fase 4): con la captura el soltar
+    // llega aquí igual, así que se mira dónde se soltó.
+    const box = event.currentTarget.getBoundingClientRect();
+    const outside =
+      box.width > 0 &&
+      (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom);
+    void (outside ? cancelVoice() : stopVoice());
   };
 
   const onVoicePointerCancel = () => {

@@ -184,6 +184,21 @@ describe('cuando la nota no sale', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it('soltar fuera del micro tira la nota en lugar de transcribirla', async () => {
+    const { native } = mount();
+    const button = mic();
+    button.getBoundingClientRect = () => ({ left: 100, right: 130, top: 100, bottom: 130, width: 30, height: 30 }) as DOMRect;
+    await act(async () => {
+      fireEvent.pointerDown(button, { button: 0, pointerId: 1, clientX: 115, clientY: 115 });
+    });
+    await act(async () => {
+      fireEvent.pointerUp(button, { button: 0, pointerId: 1, clientX: 300, clientY: 115 });
+    });
+    expect(native.calls.voiceCancel).toHaveBeenCalledTimes(1);
+    expect(native.calls.voiceStop).not.toHaveBeenCalled();
+    expect(field().value).toBe('');
+  });
+
   it('perder el foco de la ventana mientras se escucha tira la nota', async () => {
     const { native } = mount();
     await act(async () => {
