@@ -3,18 +3,16 @@
 
 Stratum Dot es el cockpit de escritorio de `stratumd` y, desde la 0.2.0, también tu **asistente**: una ventana pequeña y un icono en la bandeja para ver las sesiones vivas de Stratum —las que aloja el daemon y las que publican `stratum chat` y `stratum run` desde una terminal—, conversar con el agente, contestar lo que te pide y dejarle tareas a su asistente, que trabaja en una caja aislada.
 
-## Novedades de la 0.4.0
+## Novedades de la 0.4.1
 
-- **Auto-update**: Dot avisa cuando hay una versión nueva y la instala cuando le dices (*Install and restart*). Cada paquete va firmado y Dot no instala uno que no lo esté. Es la primera versión que lo trae: desde la 0.3.0 hay que instalarla a mano una vez.
-- **Panel *Health***: el diagnóstico del asistente (caja, conectores, cuentas, Telegram, modelo), con cómo arreglar cada cosa, y **avisos de degradación** (una credencial caducada, un conector caído, una imagen desfasada) que llegan una sola vez como notificación del sistema.
-- **Conectores** del asistente en su panel (tiempo, transporte de Madrid y Renfe, Home Assistant, Google, Grocy…). Activar uno se confirma en la ventana nativa.
-- **Recordatorios** y **vigilantes** del asistente, cada uno con su panel y su notificación del sistema.
-- **Memoria** por secciones, con los cambios sugeridos del *dreaming* y los cambios recientes del asistente, que se pueden deshacer.
-- Si falta la CLI, Dot lo dice y explica cómo instalarla. Si el daemon y Dot no son de la misma época, un aviso dice qué actualizar.
+- **Notas de voz**: mantén **`Ctrl+Alt+D`** (o el botón de micro junto a *Send*) para hablar y suelta para que el daemon lo transcriba en local. El texto va al campo para que lo revises antes de enviarlo. Hace falta activarlas en la CLI (`"voice": { "enabled": true }` en la config global) y descargar el modelo una vez con `stratum voice download` (~4 GB).
+- El atajo del Dot compacto pasa a **`Ctrl+Alt+D`** (`Ctrl+Alt+Space` lo usa también la app de Claude de escritorio), y el compacto se ha rediseñado.
+
+Desde la 0.4.0, Dot se actualiza solo: *Install and restart* en el aviso.
 
 ## Requisitos
 
-- **Stratum CLI 0.16.0 o posterior**, instalada aparte y con `stratum` en el `PATH`: `npm install -g stratum-cli` (Node.js 22 o posterior). Dot no la lleva dentro: arranca el daemon con `stratum daemon start` si no hay uno en marcha, y sin la CLI solo puede observar un daemon que arranque otro.
+- **Stratum CLI 0.17.0 o posterior**, instalada aparte y con `stratum` en el `PATH`: `npm install -g stratum-cli` (Node.js 22 o posterior). Dot no la lleva dentro: arranca el daemon con `stratum daemon start` si no hay uno en marcha, y sin la CLI solo puede observar un daemon que arranque otro.
 - Un provider configurado en la CLI (`stratum provider add …`): Dot no tiene ajustes propios.
 - Para la caja del asistente: **Podman** o Docker instalado y `"box": { "enabled": true }` en la config global de la CLI. La primera vez, arrancarla construye la imagen (tarda unos minutos). Sin caja, el asistente conversa pero no ejecuta nada.
 - Para que use la pantalla de la caja: un modelo con visión declarada en `provider.providers.<alias>.models.<id>.vision` de la config de la CLI.

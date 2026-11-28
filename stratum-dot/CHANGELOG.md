@@ -4,6 +4,22 @@ Cambios de cada versión de Stratum Dot, el cockpit de escritorio de `stratumd`,
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
+## [0.4.1] — 2026-11-28
+
+Pre-release, sigue siendo experimental. Necesita **Stratum CLI 0.17.0** o posterior (revisión 3 del protocolo). Con la 0.4.0 instalada, llega por el auto-update.
+
+### Añadido
+- **Notas de voz**, transcritas en local por el daemon (el audio no sale del equipo ni se guarda). Hay que activarlas en la CLI (`voice.enabled`) y descargar el modelo una vez con `stratum voice download`: Dot no lo descarga.
+  - **Mantener `Ctrl+Alt+D`** más de 300 ms abre el Dot compacto en «Listening…», con el nivel del micro, y graba hasta soltar. Un toque lo abre como siempre. `Esc` mientras graba tira la nota.
+  - **Botón de micro** junto a *Send* en el chat: se mantiene pulsado para grabar y se suelta para transcribir. Soltar fuera del botón o cambiar de ventana tira la nota.
+  - El texto va **al campo para revisarlo**, nunca se envía solo. Si se envía tal cual lleva delante `[nota de voz, M:SS]`; si se corrige, va sin marca.
+  - Graba el lado nativo con el micro por defecto del sistema, una nota a la vez y como mucho 5 minutos. La bandeja dice «listening…» mientras graba.
+- El panel *Health* enseña el área **Voice** del diagnóstico.
+
+### Cambiado
+- El atajo del Dot compacto pasa de `Ctrl+Alt+Space` a **`Ctrl+Alt+D`**: el anterior lo usa también la app de Claude de escritorio.
+- El Dot compacto, rediseñado: el campo en el centro con el micro dentro y una sola línea de atajos abajo.
+
 ## [0.4.0] — 2026-11-21
 
 Pre-release, sigue siendo experimental. Necesita **Stratum CLI 0.16.0** o posterior (`npm install -g stratum-cli`). Es la primera con **auto-update**; quien tenga la 0.3.0 instala esta a mano una vez.

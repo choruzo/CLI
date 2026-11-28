@@ -6,6 +6,21 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [0.17.0] — 2026-11-28
+
+Es la versión de la CLI que necesita **Stratum Dot 0.4.1** (revisión 3 del protocolo). Stratum Desktop 0.11.0 sigue funcionando con ella (avisa de que el daemon es más nuevo). Con Stratum Dot 0.4.0 todo funciona menos el panel *Health*, que no entiende el área `voice` del diagnóstico: Dot se actualiza solo a la 0.4.1.
+
+### Añadido
+- **Notas de voz transcritas en local** con Canary-1B-v2: el audio nunca sale del equipo ni se guarda. Apagadas por defecto (`voice.enabled`, solo en la config global, con `voice.language`, `voice.device` `auto|gpu|cpu` e `idleUnloadMinutes`). Usa la GPU por WebGPU y, si no puede, la CPU con un aviso.
+- **`stratum voice status|download|remove|transcribe|reseal`**: el modelo (~4 GB) se descarga una vez a `~/.stratum/models`, desde Hugging Face con la revisión fijada y comprobando el SHA-256 de cada fichero.
+- **Notas de voz de Telegram** al asistente de Dot: se transcriben en local, el bot contesta con lo que entendió y a la conversación va el texto con la marca `[nota de voz, M:SS]`. La primera nota descarga el modelo si falta.
+- **Push-to-talk** para clientes del protocolo: `voice.begin|append|end|cancel` (revisión 3) suben PCM a 16 kHz mientras se graba y devuelven el texto. Una subida por conexión, como mucho 300 s, y nunca descarga el modelo.
+- **`stratum doctor`** tiene el área `voice`: si está activada, el modelo, el runtime y el dispositivo de la última nota.
+- **Home Assistant a fondo** (`home-assistant` 1.5.0): automatizaciones, trazas de por qué no saltó una, registro y avisos de *Repairs*, de solo lectura. El asistente también puede **proponer** automatizaciones, scripts y escenas, y borrar las suyas, siempre con confirmación forzada que enseña el YAML entero y solo con ids `stratum_…`. Una automatización nueva nace apagada salvo que se pida lo contrario.
+
+### Cambiado
+- La imagen de la caja sube a la versión 17 (Home Assistant 1.5.0): se construye de nuevo la primera vez que arranca la caja.
+
 ## [0.16.0] — 2026-11-21
 
 Es la versión de la CLI que necesita **Stratum Dot 0.4.0**. Stratum Desktop 0.11.0 sigue funcionando con ella.
